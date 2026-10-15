@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CrowdFunding</title>
+
+  <!-- ethers.js: the library that lets this page talk to the blockchain -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.4/ethers.umd.min.js"></script>
+
+  <style>
+    :root {
+      --bg: #f6f7f9; --card: #ffffff; --text: #1d2330; --muted: #667085;
+      --border: #e3e6eb; --accent: #0f7b5f; --accent-text: #ffffff;
+      --danger: #c0392b; --warn: #b7791f; --bar: #e8ecef;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #12151b; --card: #1b1f27; --text: #e7eaf0; --muted: #98a2b3;
+        --border: #2b313c; --accent: #2bb38a; --accent-text: #0b1a14;
+        --danger: #ef6b5b; --warn: #e2b04a; --bar: #2b313c;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: var(--bg); color: var(--text); line-height: 1.5;
+    }
+    .wrap { max-width: 960px; margin: 0 auto; padding: 24px 16px 64px; }
+    header { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+    h1 { font-size: 1.5rem; margin: 0; }
+    h2 { font-size: 1.1rem; margin: 0 0 12px; }
+    .muted { color: var(--muted); font-size: 0.9rem; }
+    .card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+      padding: 16px; margin-top: 16px;
+    }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
+    .row > label { flex: 1 1 180px; }
+    label { display: block; font-size: 0.85rem; color: var(--muted); }
+    input {
+      width: 100%; margin-top: 4px; padding: 8px 10px; font-size: 0.95rem;
+      border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text);
+    }
+    button {
+      padding: 8px 14px; font-size: 0.9rem; font-weight: 600; cursor: pointer;
+      border: 1px solid var(--accent); border-radius: 8px; background: var(--accent); color: var(--accent-text);
+    }
+    button.secondary { background: transparent; color: var(--accent); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+    .campaign { display: flex; flex-direction: column; gap: 8px; margin-top: 0; }
+    .badge {
+      display: inline-block; font-size: 0.75rem; font-weight: 700; padding: 2px 8px;
+      border-radius: 999px; border: 1px solid currentColor;
+    }
+    .s0 { color: var(--accent); } .s1 { color: var(--accent); } .s2 { color: var(--danger); } .s3 { color: var(--muted); }
+    .bar { height: 8px; background: var(--bar); border-radius: 999px; overflow: hidden; }
+    .bar > div { height: 100%; background: var(--accent); }
+    .kv { display: flex; justify-content: space-between; font-size: 0.9rem; }
+    #toast {
+      position: fixed; left: 16px; right: 16px; bottom: 16px; max-width: 560px; margin: 0 auto;
+      padding: 12px 16px; border-radius: 10px; background: var(--text); color: var(--bg);
+      font-size: 0.9rem; display: none;
+    }
+    #toast.error { background: var(--danger); color: #fff; }
+    code { font-size: 0.85em; word-break: break-all; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ===================== HEADER: wallet ===================== -->
+  <header>
+    <div>
+      <h1>CrowdFunding</h1>
+      <div class="muted">Pledge mNGN to campaigns. Goal met by the deadline: creator withdraws. Missed: everyone gets a refund.</div>
+    </div>
+    <button id="connectBtn">Connect wallet</button>
+  </header>
+
+  <div class="card" id="walletCard" style="display:none">
+    <div class="row">
+      <div style="flex:1 1 300px">
+        <div class="muted">Account</div>
+        <code id="account"></code>
+      </div>
+      <div>
+        <div class="muted">Your mNGN balance</div>
+        <strong id="balance">0</strong>
+      </div>
+      <button class="secondary" id="mintBtn">Get 500,000 test mNGN</button>
+    </div>
+  </div>
+
+  <!-- ===================== SETTINGS: contract addresses ===================== -->
+  <div class="card">
+    <h2>Contract addresses</h2>
+    <div class="row">
+      <label>CrowdFunding address <input id="cfAddress" value="0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512" /></label>
+      <label>Token (mNGN) address <input id="tokenAddress" value="0x5FbDB2315678afecb367f032d93F642f64180aa3" /></label>
+      <label>RPC URL <input id="rpcUrl" value="http://127.0.0.1:8545" /></label>
+      <button class="secondary" id="reloadBtn">Reload</button>
+    </div>
+    <p class="muted">The defaults are what the deploy script prints on a fresh Anvil chain. Change them if yours differ.</p>
+  </div>
+
+  <!-- ===================== CREATE CAMPAIGN ===================== -->
+  <div class="card">
+    <h2>Start a campaign</h2>
+    <div class="row">
+      <label>Goal (₦) <input id="goal" type="number" min="1" placeholder="100000" /></label>
+      <label>Duration (days, max 90) <input id="duration" type="number" min="1" max="90" placeholder="7" /></label>
+      <label style="flex:2 1 280px">Description <input id="description" placeholder="Solar panels for a school" /></label>
+      <button id="createBtn">Create</button>
+    </div>
+  </div>
+
+  <!-- ===================== CAMPAIGN LIST ===================== -->
+  <div class="card">
+    <div class="row" style="justify-content:space-between; align-items:center">
+      <h2 style="margin:0">Campaigns</h2>
+      <div class="row">
+        <span class="muted" id="chainTime"></span>
+        <button class="secondary" id="warpBtn" title="Anvil only: moves the test chain's clock forward">Fast-forward 7 days</button>
+      </div>
+    </div>
+    <div id="campaigns" class="grid" style="margin-top:16px"></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// =====================================================================
+// 1. ABIs: the list of functions/errors this page can call on each contract
+//    (written in "human-readable" form, ethers turns these into calls)
+// =====================================================================
+const CF_ABI = [
+  "function campaignCount() view returns (uint256)",
+  "function campaigns(uint256) view returns (address creator, uint256 goal, uint256 totalContribution, uint64 deadline, bool campaignEnded, string campaignDescription)",
+  "function pledgedAmount(uint256, address) view returns (uint256)",
+  "function getStatus(uint256) view returns (uint8)",
+  "function createCampaign(uint256 _goal, uint256 _duration, string _campaignDescription) returns (uint256)",
+  "function pledge(uint256 _id, uint256 _amount)",
+  "function withdraw(uint256 _id)",
+  "function refund(uint256 _id)",
+  "error InvalidGoal()", "error InvalidDuration()", "error InvalidAmount()",
+  "error CampaignNotFound()", "error CampaignNotActive()", "error CampaignStillActive()",
+  "error NotCreator()", "error GoalNotAchieved()", "error GoalWasAchieved()",
+  "error CampaignAlreadyEnded()", "error NothingToRefund()", "error TransferFailed()"
+];
+
+const TOKEN_ABI = [
+  "function balanceOf(address) view returns (uint256)",
+  "function allowance(address owner, address spender) view returns (uint256)",
+  "function approve(address spender, uint256 amount) returns (bool)",
+  "function mint(address to, uint256 amount)",
+  "error ERC20InsufficientBalance(address sender, uint256 balance, uint256 needed)",
+  "error ERC20InsufficientAllowance(address spender, uint256 allowance, uint256 needed)"
+];
+
+// Matches the enum order in the contract: 0, 1, 2, 3
+const STATUS = ["Active", "Goal achieved", "Goal failed", "Ended (withdrawn)"];
+
+// Friendly text for each custom error in the contract
+const ERROR_TEXT = {
+  InvalidGoal: "The goal must be more than 0.",
+  InvalidDuration: "Duration must be between 1 and 90 days.",
+  InvalidAmount: "The amount must be more than 0.",
+  CampaignNotFound: "That campaign doesn't exist.",
+  CampaignNotActive: "This campaign is closed. Pledges are no longer accepted.",
+  CampaignStillActive: "The campaign is still running. Wait for the deadline.",
+  NotCreator: "Only the campaign creator can withdraw.",
+  GoalNotAchieved: "The goal wasn't reached, so the creator can't withdraw.",
+  GoalWasAchieved: "The goal was reached, so refunds aren't available.",
+  CampaignAlreadyEnded: "The funds have already been withdrawn.",
+  NothingToRefund: "You have nothing to refund on this campaign.",
+  TransferFailed: "The token transfer failed.",
+  ERC20InsufficientBalance: "You don't have enough mNGN. Use the 'Get test mNGN' button.",
+  ERC20InsufficientAllowance: "The contract isn't approved to spend that much of your mNGN."
+};
+
+const ANVIL_CHAIN_ID = 31337n;
+const $ = (id) => document.getElementById(id);
+
+// =====================================================================
+// 2. CONNECTIONS
+//    readProvider: reads data straight from the chain (no wallet needed)
+//    signer:       your MetaMask account, used to SEND transactions
+// =====================================================================
+let readProvider, signer, account;
+let cfRead, tokenRead;   // read-only contract objects
+let cfWrite, tokenWrite; // contract objects that send transactions from your wallet
+
+function setupReadContracts() {
+  readProvider = new ethers.JsonRpcProvider($("rpcUrl").value.trim());
+  cfRead = new ethers.Contract($("cfAddress").value.trim(), CF_ABI, readProvider);
+  tokenRead = new ethers.Contract($("tokenAddress").value.trim(), TOKEN_ABI, readProvider);
+}
+
+async function connectWallet() {
+  if (!window.ethereum) {
+    toast("MetaMask not found. Install it, then refresh this page.", true);
+    return;
+  }
+  const browserProvider = new ethers.BrowserProvider(window.ethereum);
+  await browserProvider.send("eth_requestAccounts", []);
+
+  const network = await browserProvider.getNetwork();
+  if (network.chainId !== ANVIL_CHAIN_ID) {
+    toast("Switch MetaMask to the Anvil network (chain ID 31337).", true);
+  }
+
+  signer = await browserProvider.getSigner();
+  account = await signer.getAddress();
+  cfWrite = new ethers.Contract($("cfAddress").value.trim(), CF_ABI, signer);
+  tokenWrite = new ethers.Contract($("tokenAddress").value.trim(), TOKEN_ABI, signer);
+
+  $("account").textContent = account;
+  $("walletCard").style.display = "block";
+  $("connectBtn").textContent = "Connected";
+  $("connectBtn").disabled = true;
+  await refresh();
+}
+
+// =====================================================================
+// 3. HELPERS
+// =====================================================================
+// Token amounts have 18 decimals: "100000" naira <-> 100000 * 10^18
+const toUnits = (naira) => ethers.parseUnits(String(naira), 18);
+const fromUnits = (units) =>
+  "₦" + Number(ethers.formatUnits(units, 18)).toLocaleString(undefined, { maximumFractionDigits: 2 });
+
+function toast(message, isError = false) {
+  const t = $("toast");
+  t.textContent = message;
+  t.className = isError ? "error" : "";
+  t.style.display = "block";
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => (t.style.display = "none"), 6000);
+}
+
+// Turns a failed transaction into a readable message using our custom errors
+function explainError(err) {
+  const name = err?.revert?.name;
+  if (name && ERROR_TEXT[name]) return ERROR_TEXT[name];
+  const data = err?.data || err?.info?.error?.data || err?.error?.data;
+  for (const iface of [cfRead?.interface, tokenRead?.interface]) {
+    try {
+      const parsed = iface && data && iface.parseError(data);
+      if (parsed && ERROR_TEXT[parsed.name]) return ERROR_TEXT[parsed.name];
+    } catch (_) {}
+  }
+  if (err?.code === "ACTION_REJECTED") return "You rejected the transaction in MetaMask.";
+  return err?.shortMessage || err?.message || "Something went wrong.";
+}
+
+// Sends a transaction, waits for it, then refreshes the page data
+async function send(label, txPromiseFn) {
+  if (!signer) return toast("Connect your wallet first.", true);
+  try {
+    toast(label + "... confirm in MetaMask");
+    const tx = await txPromiseFn();
+    toast(label + "... waiting for confirmation");
+    await tx.wait();
+    toast(label + " done.");
+    await refresh();
+  } catch (err) {
+    console.error(err);
+    toast(explainError(err), true);
+  }
+}
+
+function formatTimeLeft(seconds) {
+  if (seconds <= 0) return "Ended";
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return d > 0 ? `${d}d ${h}h left` : h > 0 ? `${h}h ${m}m left` : `${m}m left`;
+}
+
+// =====================================================================
+// 4. ACTIONS: each one calls a function in CrowdFunding.sol
+// =====================================================================
+async function createCampaign() {
+  const goal = $("goal").value;
+  const days = $("duration").value;
+  const description = $("description").value.trim();
+  if (!goal || !days || !description) return toast("Fill in goal, duration and description.", true);
+
+  const durationSeconds = BigInt(Math.round(Number(days) * 86400));
+  await send("Creating campaign", () =>
+    cfWrite.createCampaign(toUnits(goal), durationSeconds, description)
+  );
+  $("goal").value = $("duration").value = $("description").value = "";
+}
+
+async function pledge(id) {
+  const value = $("pledge-" + id).value;
+  if (!value || Number(value) <= 0) return toast("Enter an amount to pledge.", true);
+  const amount = toUnits(value);
+
+  // ERC-20 step 1: approve the contract to take your tokens (only if needed)
+  const cfAddress = $("cfAddress").value.trim();
+  const allowed = await tokenRead.allowance(account, cfAddress);
+  if (allowed < amount) {
+    await send("Approving mNGN", () => tokenWrite.approve(cfAddress, amount));
+  }
+  // ERC-20 step 2: the contract pulls the tokens with transferFrom inside pledge()
+  await send("Pledging " + fromUnits(amount), () => cfWrite.pledge(id, amount));
+}
+
+const withdraw = (id) => send("Withdrawing", () => cfWrite.withdraw(id));
+const refund = (id) => send("Refunding", () => cfWrite.refund(id));
+const mintTestTokens = () => send("Minting test mNGN", () => tokenWrite.mint(account, toUnits(500000)));
+
+// Anvil-only helper: moves the test chain's clock forward so deadlines pass
+async function fastForward() {
+  try {
+    await readProvider.send("evm_increaseTime", [7 * 86400]);
+    await readProvider.send("evm_mine", []);
+    toast("Moved the chain clock forward 7 days.");
+    await refresh();
+  } catch (err) {
+    toast("Fast-forward only works on Anvil.", true);
+  }
+}
+
+// =====================================================================
+// 5. READ & DRAW: loads every campaign and shows it as a card
+// =====================================================================
+async function refresh() {
+  try {
+    const block = await readProvider.getBlock("latest");
+    const now = Number(block.timestamp);
+    $("chainTime").textContent = "Chain time: " + new Date(now * 1000).toLocaleString();
+
+    if (account) $("balance").textContent = fromUnits(await tokenRead.balanceOf(account));
+
+    const count = Number(await cfRead.campaignCount());
+    const container = $("campaigns");
+    if (count === 0) {
+      container.innerHTML = '<p class="muted">No campaigns yet. Start one above.</p>';
+      return;
+    }
+
+    const cards = [];
+    for (let id = count; id >= 1; id--) {          // newest first
+      const c = await cfRead.campaigns(id);
+      const status = Number(await cfRead.getStatus(id));
+      const mine = account ? await cfRead.pledgedAmount(id, account) : 0n;
+      const isCreator = account && c.creator.toLowerCase() === account.toLowerCase();
+      const percent = c.goal > 0n ? Number((c.totalContribution * 100n) / c.goal) : 0;
+
+      // Show only the buttons that make sense for this campaign's status
+      let actions = "";
+      if (status === 0) {
+        actions = `<div class="row">
+            <label>Amount (₦)<input id="pledge-${id}" type="number" min="1" placeholder="10000" /></label>
+            <button onclick="pledge(${id})">Pledge</button>
+          </div>`;
+      } else if (status === 1 && isCreator) {
+        actions = `<button onclick="withdraw(${id})">Withdraw ${fromUnits(c.totalContribution)}</button>`;
+      } else if (status === 2 && mine > 0n) {
+        actions = `<button onclick="refund(${id})">Refund my ${fromUnits(mine)}</button>`;
+      }
+
+      cards.push(`
+        <div class="card campaign">
+          <div class="row" style="justify-content:space-between; align-items:center">
+            <strong>#${id}</strong>
+            <span class="badge s${status}">${STATUS[status]}</span>
+          </div>
+          <div>${escapeHtml(c.campaignDescription)}</div>
+          <div class="bar"><div style="width:${Math.min(percent, 100)}%"></div></div>
+          <div class="kv"><span>${fromUnits(c.totalContribution)} raised</span><span>${percent}% of ${fromUnits(c.goal)}</span></div>
+          <div class="kv muted"><span>${status === 0 ? formatTimeLeft(Number(c.deadline) - now) : "Deadline passed"}</span>
+            <span>${isCreator ? "You created this" : "By " + c.creator.slice(0, 6) + "…" + c.creator.slice(-4)}</span></div>
+          ${mine > 0n ? `<div class="kv muted"><span>Your pledge</span><span>${fromUnits(mine)}</span></div>` : ""}
+          ${actions}
+        </div>`);
+    }
+    container.innerHTML = cards.join("");
+  } catch (err) {
+    console.error(err);
+    $("campaigns").innerHTML =
+      '<p class="muted">Couldn\'t load campaigns. Is Anvil running, and are the addresses above correct?</p>';
+  }
+}
+
+function escapeHtml(text) {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// =====================================================================
+// 6. WIRE UP BUTTONS
+// =====================================================================
+$("connectBtn").onclick = connectWallet;
+$("createBtn").onclick = createCampaign;
+$("mintBtn").onclick = mintTestTokens;
+$("warpBtn").onclick = fastForward;
+$("reloadBtn").onclick = () => {
+  setupReadContracts();
+  if (signer) {
+    cfWrite = new ethers.Contract($("cfAddress").value.trim(), CF_ABI, signer);
+    tokenWrite = new ethers.Contract($("tokenAddress").value.trim(), TOKEN_ABI, signer);
+  }
+  refresh();
+};
+
+// Refresh when you switch accounts in MetaMask
+if (window.ethereum) {
+  window.ethereum.on?.("accountsChanged", () => location.reload());
+  window.ethereum.on?.("chainChanged", () => location.reload());
+}
+
+setupReadContracts();
+refresh();
+</script>
+</body>
+</html>

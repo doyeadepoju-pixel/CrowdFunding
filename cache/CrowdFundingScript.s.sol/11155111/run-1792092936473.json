@@ -1,0 +1,11 @@
+{
+  "transactions": [
+    {
+      "rpc": "https://eth-sepolia.g.alchemy.com/v2/alch_CYeevjcQk_zaEdh0DaILV\r"
+    },
+    {
+      "rpc": "https://eth-sepolia.g.alchemy.com/v2/alch_CYeevjcQk_zaEdh0DaILV\r"
+    }
+  ],
+  "recovery_generation": "0xbeba07801c56eb97f316820c3de4912c5cc5ab25301630ad6385be2ce38cdb5e"
+}
